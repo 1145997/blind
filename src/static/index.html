@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>手语翻译 Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .wrap {
+      display: inline-block;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.08);
+    }
+    video, canvas {
+      width: 640px;
+      max-width: 95vw;
+      border-radius: 10px;
+      background: black;
+    }
+    #result {
+      margin-top: 16px;
+      font-size: 28px;
+      font-weight: bold;
+      color: #222;
+    }
+    #status {
+      margin-top: 8px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>基于视觉识别的手语翻译 Demo</h1>
+  <div class="wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+    <div id="result">等待识别...</div>
+    <div id="status">正在初始化摄像头与手部检测...</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    const videoElement = document.getElementById("video");
+    const canvasElement = document.getElementById("canvas");
+    const canvasCtx = canvasElement.getContext("2d");
+    const resultEl = document.getElementById("result");
+    const statusEl = document.getElementById("status");
+
+    let latestLandmarks = null;
+    let lastSendTime = 0;
+
+    async function sendToBackend(landmarks) {
+      try {
+        const resp = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ landmarks })
+        });
+        const data = await resp.json();
+        resultEl.textContent = data.text || "未识别";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "后端请求失败，请检查服务是否启动";
+      }
+    }
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    hands.onResults((results) => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const hand = results.multiHandLandmarks[0];
+        latestLandmarks = hand.map(p => ({
+          x: p.x,
+          y: p.y,
+          z: p.z || 0
+        }));
+
+        drawConnectors(canvasCtx, hand, HAND_CONNECTIONS, { lineWidth: 3 });
+        drawLandmarks(canvasCtx, hand, { lineWidth: 1, radius: 4 });
+
+        const now = Date.now();
+        if (now - lastSendTime > 400) {
+          lastSendTime = now;
+          sendToBackend(latestLandmarks);
+        }
+
+        statusEl.textContent = "检测到手部，正在识别...";
+      } else {
+        resultEl.textContent = "未检测到手";
+        statusEl.textContent = "请将手放到摄像头前";
+      }
+
+      canvasCtx.restore();
+
+      // 把 canvas 内容同步显示到 video 区域感觉不方便，这里直接保留原 video，
+      // 不额外替换展示层。
+    });
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: false
+        });
+        videoElement.srcObject = stream;
+
+        const camera = new Camera(videoElement, {
+          onFrame: async () => {
+            await hands.send({ image: videoElement });
+          },
+          width: 640,
+          height: 480
+        });
+
+        camera.start();
+        statusEl.textContent = "摄像头已启动";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "无法打开摄像头，请检查浏览器权限";
+      }
+    }
+
+    initCamera();
+  </script>
+</body>
+</html>
