@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>手语翻译 Demo</title>
+  <title>手势识别 + TTS Demo</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -22,7 +22,7 @@
       border-radius: 12px;
       box-shadow: 0 4px 18px rgba(0,0,0,0.08);
     }
-    video, canvas {
+    video {
       width: 640px;
       max-width: 95vw;
       border-radius: 10px;
@@ -42,27 +42,49 @@
   </style>
 </head>
 <body>
-  <h1>基于视觉识别的手语翻译 Demo</h1>
+  <h1>手势识别 + TTS Demo</h1>
   <div class="wrap">
     <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
     <div id="result">等待识别...</div>
     <div id="status">正在初始化摄像头与手部检测...</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <script>
     const videoElement = document.getElementById("video");
-    const canvasElement = document.getElementById("canvas");
-    const canvasCtx = canvasElement.getContext("2d");
     const resultEl = document.getElementById("result");
     const statusEl = document.getElementById("status");
 
-    let latestLandmarks = null;
     let lastSendTime = 0;
+    let lastSpokenText = "";
+    let lastSpeakTime = 0;
+
+    const SEND_INTERVAL = 400;
+    const SPEAK_COOLDOWN = 2000;
+
+    function speakText(text) {
+      if (!text || text === "未识别" || text === "未检测到手") return;
+
+      const now = Date.now();
+      if (text === lastSpokenText && now - lastSpeakTime < SPEAK_COOLDOWN) {
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "zh-CN";
+      utter.rate = 1.0;
+      utter.pitch = 1.0;
+      utter.volume = 1.0;
+
+      window.speechSynthesis.speak(utter);
+
+      lastSpokenText = text;
+      lastSpeakTime = now;
+    }
 
     async function sendToBackend(landmarks) {
       try {
@@ -72,7 +94,10 @@
           body: JSON.stringify({ landmarks })
         });
         const data = await resp.json();
-        resultEl.textContent = data.text || "未识别";
+        const text = data.text || "未识别";
+
+        resultEl.textContent = text;
+        speakText(text);
       } catch (err) {
         console.error(err);
         statusEl.textContent = "后端请求失败，请检查服务是否启动";
@@ -86,30 +111,23 @@
     hands.setOptions({
       maxNumHands: 1,
       modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.6
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
     });
 
     hands.onResults((results) => {
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const hand = results.multiHandLandmarks[0];
-        latestLandmarks = hand.map(p => ({
+        const landmarks = hand.map(p => ({
           x: p.x,
           y: p.y,
           z: p.z || 0
         }));
 
-        drawConnectors(canvasCtx, hand, HAND_CONNECTIONS, { lineWidth: 3 });
-        drawLandmarks(canvasCtx, hand, { lineWidth: 1, radius: 4 });
-
         const now = Date.now();
-        if (now - lastSendTime > 400) {
+        if (now - lastSendTime > SEND_INTERVAL) {
           lastSendTime = now;
-          sendToBackend(latestLandmarks);
+          sendToBackend(landmarks);
         }
 
         statusEl.textContent = "检测到手部，正在识别...";
@@ -117,11 +135,6 @@
         resultEl.textContent = "未检测到手";
         statusEl.textContent = "请将手放到摄像头前";
       }
-
-      canvasCtx.restore();
-
-      // 把 canvas 内容同步显示到 video 区域感觉不方便，这里直接保留原 video，
-      // 不额外替换展示层。
     });
 
     async function initCamera() {
