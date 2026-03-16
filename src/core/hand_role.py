@@ -42,6 +42,11 @@ class HandRoleEngine:
         self.last_gesture: Optional[str] = None
         self.last_code: Optional[str] = None
         self.last_label: Optional[str] = None
+        # 防抖时间
+        self.last_trigger_time: float = 0.0
+        # 稳定帧识别
+        self.stable_gesture = None
+        self.stable_count = 0
 
     # =========================
     # 对外接口
@@ -60,12 +65,29 @@ class HandRoleEngine:
         """
         对外统一预测接口
         """
+
+        now = time()
+
+        debounce = SETTINGS["GESTURE_DEBOUNCE_TIME"]
+
+        # 防抖：1.5 秒内不触发
+        if now - self.last_trigger_time < debounce:
+            return PredictResult(
+                gesture=None,
+                code=None,
+                label=None,
+                locked=self.lock_ctx.active,
+                state=self.state,
+            )
+
         self._check_lock_timeout()
 
-        gesture = detect_first_match(
+        raw_gesture = detect_first_match(
             landmarks,
             ordered_tags=SETTINGS["GESTURE_ORDER"]
         )
+
+        gesture = self._stable_detect(raw_gesture)
 
         if SETTINGS.get("DEBUG_LOG", False):
             print(f"[HandRoleEngine] state={self.state}, gesture={gesture}")
@@ -231,3 +253,30 @@ class HandRoleEngine:
         self.last_gesture = gesture
         self.last_code = code
         self.last_label = label
+        # 更新防抖时间
+        self.last_trigger_time = time()
+
+    def _stable_detect(self, gesture: Optional[str]) -> Optional[str]:
+
+        if gesture is None:
+            self.stable_gesture = None
+            self.stable_count = 0
+            return None
+
+        if gesture == self.stable_gesture:
+            self.stable_count += 1
+        else:
+            self.stable_gesture = gesture
+            self.stable_count = 1
+
+        if SETTINGS.get("DEBUG_LOG", False):
+            print(
+                f"[StableDetect] gesture={gesture} "
+                f"count={self.stable_count}"
+            )
+
+        if self.stable_count >= SETTINGS["STABLE_FRAME_COUNT"]:
+            self.stable_count = 0
+            return gesture
+
+        return None

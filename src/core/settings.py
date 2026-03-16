@@ -15,7 +15,10 @@ settings.py
 # ===============================
 
 SETTINGS = {
-
+    #
+    "STABLE_FRAME_COUNT": 3,
+    #防抖
+    "GESTURE_DEBOUNCE_TIME": 1.5,
     # OK 手势：拇指食指距离
     "OK_DISTANCE_THRESHOLD": 0.06,
 
