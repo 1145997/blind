@@ -1,350 +1,190 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>手势词库输入 Demo</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      text-align: center;
-      margin: 0;
-      padding: 20px;
-    }
+<meta charset="UTF-8">
+<title>Gesture Word Input</title>
 
-    .wrap {
-      display: inline-block;
-      background: white;
-      padding: 20px;
-      border-radius: 12px;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.08);
-      max-width: 940px;
-      width: 100%;
-    }
+<style>
+body{
+    font-family: Arial;
+    text-align:center;
+}
 
-    h1 {
-      margin-bottom: 12px;
-    }
+video{
+    width:640px;
+    border:2px solid black;
+}
 
-    video {
-      width: 640px;
-      max-width: 95vw;
-      border-radius: 10px;
-      background: black;
-    }
+#panel{
+    margin-top:20px;
+    font-size:22px;
+}
 
-    #result {
-      margin-top: 16px;
-      font-size: 28px;
-      font-weight: bold;
-      color: #222;
-    }
+.row{
+    margin:8px;
+}
 
-    #status, #subinfo {
-      margin-top: 10px;
-      font-size: 14px;
-      color: #666;
-      line-height: 1.8;
-    }
+.locked{
+    color:red;
+    font-weight:bold;
+}
+</style>
 
-    .panel {
-      margin-top: 18px;
-      text-align: left;
-      background: #fafafa;
-      border-radius: 10px;
-      padding: 14px;
-      border: 1px solid #eee;
-    }
-
-    .panel h3 {
-      margin: 0 0 10px 0;
-    }
-
-    .item {
-      line-height: 1.8;
-      font-size: 14px;
-    }
-
-    button {
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      cursor: pointer;
-      margin-top: 10px;
-    }
-  </style>
 </head>
+
 <body>
-  <div class="wrap">
-    <h1>手势词库输入 Demo</h1>
 
-    <video id="video" autoplay playsinline muted></video>
+<h2>Gesture Word Input Demo</h2>
 
-    <div id="result">等待识别...</div>
-    <div id="subinfo">
-      当前状态：<span id="stateText">idle</span>　
-      当前手势：<span id="gestureText">无</span>　
-      当前缓冲：<span id="bufferText">空</span>
-    </div>
-    <div id="status">请先做 OK 手势进入输入模式</div>
+<video id="video" autoplay playsinline></video>
 
-    <button id="speakTestBtn">测试语音</button>
+<div id="panel">
 
-    <div class="panel">
-      <h3>当前手势库</h3>
-      <div id="libraryPanel">加载中...</div>
-    </div>
-  </div>
+<div class="row">Gesture: <span id="gesture">-</span></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<div class="row">Code: <span id="code">-</span></div>
 
-  <script>
-    const videoElement = document.getElementById("video");
-    const resultEl = document.getElementById("result");
-    const statusEl = document.getElementById("status");
-    const stateTextEl = document.getElementById("stateText");
-    const gestureTextEl = document.getElementById("gestureText");
-    const bufferTextEl = document.getElementById("bufferText");
-    const libraryPanel = document.getElementById("libraryPanel");
-    const speakTestBtn = document.getElementById("speakTestBtn");
+<div class="row">Text: <span id="label">-</span></div>
 
-    const SEND_INTERVAL = 250;
-    const INPUT_TIMEOUT_MS = 1500;
-    const SPEAK_COOLDOWN = 1500;
-    const SAME_GESTURE_GAP_MS = 700; // 防止同一个手势一秒内被重复加词
+<div class="row">State: <span id="state">idle</span></div>
 
-    let lastSendTime = 0;
+<div class="row">Locked: <span id="locked">false</span></div>
 
-    let systemState = "idle"; // idle | inputting
-    let wordBuffer = [];
-    let lastInputTime = 0;
-    let lastAcceptedGesture = null;
-    let lastAcceptedGestureTime = 0;
+</div>
 
-    let lastSpokenText = "";
-    let lastSpeakTime = 0;
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-    const gestureWordMap = {
-      "v_sign": "我画的",
-      "rock_sign": "这个角色",
-      "thumbs_up": "怎么样",
-      "call_sign": "还需要",
-      "three_sign": "修改吗",
-      "point_up_sign": "请看看"
-    };
+<script>
 
-    function updateUI() {
-      stateTextEl.textContent = systemState;
-      bufferTextEl.textContent = wordBuffer.length ? wordBuffer.join(" | ") : "空";
+const video = document.getElementById("video")
+
+const gestureText = document.getElementById("gesture")
+const codeText = document.getElementById("code")
+const labelText = document.getElementById("label")
+const stateText = document.getElementById("state")
+const lockedText = document.getElementById("locked")
+
+
+const canvas = document.createElement("canvas")
+const ctx = canvas.getContext("2d")
+document.body.appendChild(canvas)
+
+
+async function sendLandmarks(landmarks){
+
+    const payload = {
+        landmarks: landmarks.map(p=>({
+            x:p.x,
+            y:p.y,
+            z:p.z
+        }))
     }
 
-    function speakText(text) {
-      if (!text) return;
+    try{
 
-      const now = Date.now();
-      if (text === lastSpokenText && now - lastSpeakTime < SPEAK_COOLDOWN) {
-        return;
-      }
+        const res = await fetch("/predict",{
+            method:"POST",
+            headers:{
+                "Content-Type":"application/json"
+            },
+            body:JSON.stringify(payload)
+        })
 
-      window.speechSynthesis.cancel();
+        const data = await res.json()
 
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = "zh-CN";
-      utter.rate = 1.0;
-      utter.pitch = 1.0;
-      utter.volume = 1.0;
-      window.speechSynthesis.speak(utter);
+        updateUI(data)
 
-      lastSpokenText = text;
-      lastSpeakTime = now;
+    }catch(err){
+        console.error(err)
     }
 
-    function resetInputState() {
-      systemState = "idle";
-      wordBuffer = [];
-      lastInputTime = 0;
-      lastAcceptedGesture = null;
-      lastAcceptedGestureTime = 0;
-      updateUI();
+}
+
+
+function updateUI(data){
+
+    gestureText.innerText = data.gesture ?? "-"
+    codeText.innerText = data.code ?? "-"
+    labelText.innerText = data.label ?? "-"
+
+    stateText.innerText = data.state
+    lockedText.innerText = data.locked
+
+    if(data.locked){
+        lockedText.classList.add("locked")
+    }else{
+        lockedText.classList.remove("locked")
     }
 
-    function enterInputMode() {
-      systemState = "inputting";
-      wordBuffer = [];
-      lastInputTime = Date.now();
-      lastAcceptedGesture = null;
-      lastAcceptedGestureTime = 0;
-      resultEl.textContent = "已进入输入模式";
-      statusEl.textContent = "请依次输入手势词语，1.5 秒无新手势将自动播报";
-      speakText("已进入输入模式");
-      updateUI();
+    if(data.label){
+        speak(data.label)
     }
 
-    function commitSentence() {
-      if (!wordBuffer.length) {
-        resetInputState();
-        resultEl.textContent = "未输入词语，已退出输入模式";
-        statusEl.textContent = "请先做 OK 手势进入输入模式";
-        return;
-      }
+}
 
-      const sentence = wordBuffer.join("");
-      resultEl.textContent = sentence;
-      statusEl.textContent = "已自动播报并退出输入模式";
-      speakText(sentence);
-      resetInputState();
+
+function speak(text){
+
+    if(!text) return
+
+    const msg = new SpeechSynthesisUtterance(text)
+
+    msg.lang="zh-CN"
+
+    speechSynthesis.speak(msg)
+
+}
+
+
+
+const hands = new Hands({
+    locateFile:(file)=>{
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     }
+})
 
-    function acceptWordGesture(gesture) {
-      const now = Date.now();
-      const word = gestureWordMap[gesture];
-      if (!word) return;
+hands.setOptions({
+    maxNumHands:1,
+    modelComplexity:1,
+    minDetectionConfidence:0.7,
+    minTrackingConfidence:0.7
+})
 
-      // 同一个手势短时间不重复收录，避免手还没放下就疯狂加词
-      if (gesture === lastAcceptedGesture && now - lastAcceptedGestureTime < SAME_GESTURE_GAP_MS) {
-        return;
-      }
 
-      wordBuffer.push(word);
-      lastInputTime = now;
-      lastAcceptedGesture = gesture;
-      lastAcceptedGestureTime = now;
+hands.onResults((results)=>{
 
-      resultEl.textContent = wordBuffer.join("");
-      statusEl.textContent = `已输入：${word}，继续输入或等待自动播报`;
-      updateUI();
-    }
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
 
-    function handleGesture(gesture) {
-      if (!gesture) return;
+    ctx.drawImage(results.image,0,0,canvas.width,canvas.height)
 
-      if (systemState === "idle") {
-        if (gesture === "ok_sign") {
-          enterInputMode();
+    if(results.multiHandLandmarks){
+
+        for(const landmarks of results.multiHandLandmarks){
+
+            drawConnectors(ctx,landmarks,HAND_CONNECTIONS)
+            drawLandmarks(ctx,landmarks)
+
+            sendLandmarks(landmarks)
         }
-        return;
-      }
-
-      if (systemState === "inputting") {
-        if (gesture === "ok_sign") {
-          // 输入态再次 OK 不加词，只刷新超时，避免误退出
-          lastInputTime = Date.now();
-          return;
-        }
-
-        acceptWordGesture(gesture);
-      }
     }
 
-    async function loadLibrary() {
-      try {
-        const resp = await fetch("/gesture-library");
-        const data = await resp.json();
-        const lib = data.library || {};
+})
 
-        libraryPanel.innerHTML = Object.entries(lib).map(([k, v]) => {
-          return `<div class="item"><strong>${k}</strong> → ${v}</div>`;
-        }).join("");
-      } catch (err) {
-        console.error(err);
-        libraryPanel.innerHTML = "加载手势库失败";
-      }
-    }
 
-    async function sendToBackend(landmarks) {
-      try {
-        const resp = await fetch("/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ landmarks })
-        });
+const camera = new Camera(video,{
+    onFrame: async ()=>{
+        await hands.send({image:video})
+    },
+    width:640,
+    height:480
+})
 
-        const data = await resp.json();
-        const gesture = data.gesture || null;
+camera.start()
 
-        gestureTextEl.textContent = gesture || "无";
-        handleGesture(gesture);
-      } catch (err) {
-        console.error(err);
-        statusEl.textContent = "后端请求失败，请检查服务是否启动";
-      }
-    }
+</script>
 
-    speakTestBtn.addEventListener("click", () => {
-      speakText("语音测试成功");
-    });
-
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
-
-    hands.onResults((results) => {
-      // 输入态时，检查 1.5 秒无新手势自动提交
-      if (systemState === "inputting" && lastInputTime > 0) {
-        if (Date.now() - lastInputTime > INPUT_TIMEOUT_MS) {
-          commitSentence();
-        }
-      }
-
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const hand = results.multiHandLandmarks[0];
-        const landmarks = hand.map(p => ({
-          x: p.x,
-          y: p.y,
-          z: p.z || 0
-        }));
-
-        const now = Date.now();
-        if (now - lastSendTime > SEND_INTERVAL) {
-          lastSendTime = now;
-          sendToBackend(landmarks);
-        }
-
-        if (systemState === "idle") {
-          statusEl.textContent = "请先做 OK 手势进入输入模式";
-        }
-      } else {
-        gestureTextEl.textContent = "无";
-      }
-    });
-
-    async function initCamera() {
-      try {
-        await loadLibrary();
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: false
-        });
-        videoElement.srcObject = stream;
-
-        const camera = new Camera(videoElement, {
-          onFrame: async () => {
-            await hands.send({ image: videoElement });
-          },
-          width: 640,
-          height: 480
-        });
-
-        camera.start();
-        updateUI();
-        statusEl.textContent = "摄像头已启动";
-      } catch (err) {
-        console.error(err);
-        statusEl.textContent = "无法打开摄像头，请检查浏览器权限";
-      }
-    }
-
-    initCamera();
-  </script>
 </body>
 </html>

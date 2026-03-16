@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 
 class Landmark(BaseModel):
@@ -10,3 +10,11 @@ class Landmark(BaseModel):
 
 class PredictPayload(BaseModel):
     landmarks: List[Landmark]
+
+
+class PredictResult(BaseModel):
+    gesture: Optional[str] = None
+    code: Optional[str] = None
+    label: Optional[str] = None
+    locked: bool = False
+    state: str = "idle"
