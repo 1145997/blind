@@ -136,9 +136,9 @@ button:hover{
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="/mediapipe/hands.js"></script>
+<script src="/mediapipe/camera_utils.js"></script>
+<script src="/mediapipe/drawing_utils.js"></script>
 
 <script>
 const video = document.getElementById("video")
@@ -407,8 +407,8 @@ resetBtn.addEventListener("click", async () => {
 // MediaPipe
 // ---------------------
 const hands = new Hands({
-    locateFile:(file)=>{
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    locateFile: (file) => {
+        return `/mediapipe/${file}`
     }
 })
 
